@@ -1,0 +1,9 @@
+[
+  {
+    "name": "atuin",
+    "status": "started",
+    "user": "example",
+    "file": "/Users/example/Library/LaunchAgents/sh.brew.atuin.plist",
+    "exit_code": null
+  }
+]

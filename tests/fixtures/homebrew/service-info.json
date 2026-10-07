@@ -1,0 +1,23 @@
+[
+  {
+    "name": "atuin",
+    "service_name": "sh.brew.atuin",
+    "running": true,
+    "loaded": true,
+    "schedulable": false,
+    "pid": 1234,
+    "exit_code": null,
+    "user": "example",
+    "status": "started",
+    "file": "/Users/example/Library/LaunchAgents/sh.brew.atuin.plist",
+    "registered": true,
+    "loaded_file": "/Users/example/Library/LaunchAgents/sh.brew.atuin.plist",
+    "command": "/opt/homebrew/opt/atuin/bin/atuin daemon start",
+    "working_dir": null,
+    "root_dir": null,
+    "log_path": "/opt/homebrew/var/log/atuin.log",
+    "error_log_path": "/opt/homebrew/var/log/atuin.log",
+    "interval": null,
+    "cron": null
+  }
+]

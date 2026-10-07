@@ -1,0 +1,3 @@
+# Apple Silicon; Intel: /usr/local/bin/brew
+brew_path = "/opt/homebrew/bin/brew"
+max_output_lines = 2000

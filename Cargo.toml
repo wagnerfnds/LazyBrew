@@ -1,0 +1,30 @@
+[package]
+name = "lazybrew"
+version = "0.2.0"
+edition = "2024"
+description = "Keyboard-first Homebrew management for macOS"
+license = "MIT"
+repository = "https://github.com/wagnerfnds/LazyBrew"
+readme = "README.md"
+keywords = ["homebrew", "tui", "macos", "terminal"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+crossterm = "0.29.0"
+directories = "6.0.0"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
+toml = "1.1.6"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

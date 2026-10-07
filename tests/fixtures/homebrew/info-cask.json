@@ -1,0 +1,216 @@
+{
+  "formulae": [],
+  "casks": [
+    {
+      "token": "firefox",
+      "full_token": "firefox",
+      "old_tokens": [],
+      "tap": "homebrew/cask",
+      "name": [
+        "Mozilla Firefox"
+      ],
+      "desc": "Web browser",
+      "homepage": "https://www.mozilla.org/firefox/",
+      "url": "https://download-installer.cdn.mozilla.net/pub/firefox/releases/157.0.1/mac/en-US/Firefox%20157.0.1.dmg",
+      "url_specs": {},
+      "version": "157.0.1",
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "installed": null,
+      "bundle_version": null,
+      "bundle_short_version": null,
+      "pinned": false,
+      "pinned_version": null,
+      "outdated": false,
+      "sha256": "40a0a649120635460256dae9ad63e40377f77326cbc9c449a5d0a1d7f5dd7982",
+      "artifacts": [
+        {
+          "uninstall": [
+            {
+              "quit": "org.mozilla.firefox"
+            }
+          ]
+        },
+        {
+          "app": [
+            "Firefox.app"
+          ],
+          "target": "/Applications/Firefox.app"
+        },
+        {
+          "command_wrapper": [
+            "firefox",
+            {
+              "executable": "/Applications/Firefox.app/Contents/MacOS/firefox"
+            }
+          ],
+          "target": "/opt/homebrew/bin/firefox"
+        },
+        {
+          "zap": [
+            {
+              "trash": [
+                "/Library/Logs/DiagnosticReports/firefox_*",
+                "~/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/org.mozilla.firefox.sfl*",
+                "~/Library/Application Support/CrashReporter/firefox_*",
+                "~/Library/Application Support/Firefox",
+                "~/Library/Caches/Firefox",
+                "~/Library/Caches/Mozilla/updates/Applications/Firefox",
+                "~/Library/Caches/org.mozilla.crashreporter",
+                "~/Library/Caches/org.mozilla.firefox",
+                "~/Library/Preferences/org.mozilla.crashreporter.plist",
+                "~/Library/Preferences/org.mozilla.firefox.plist",
+                "~/Library/Saved Application State/org.mozilla.firefox.savedState",
+                "~/Library/WebKit/org.mozilla.firefox"
+              ],
+              "rmdir": [
+                "~/Library/Application Support/Mozilla",
+                "~/Library/Caches/Mozilla",
+                "~/Library/Caches/Mozilla/updates",
+                "~/Library/Caches/Mozilla/updates/Applications"
+              ]
+            }
+          ]
+        }
+      ],
+      "caveats": null,
+      "caveats_rosetta": null,
+      "depends_on": {
+        "macos": {}
+      },
+      "conflicts_with": {
+        "cask": [
+          "firefox@beta",
+          "firefox@cn",
+          "firefox@esr"
+        ]
+      },
+      "container": null,
+      "rename": [],
+      "auto_updates": true,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "tap_git_head": "b6324991a8bbe392b5cd968cdca6e27cb54e5f80",
+      "languages": [
+        "ach",
+        "af",
+        "an",
+        "ar",
+        "ast",
+        "az",
+        "be",
+        "bg",
+        "bn",
+        "br",
+        "bs",
+        "ca",
+        "cak",
+        "cs",
+        "cy",
+        "da",
+        "de",
+        "dsb",
+        "el",
+        "en-CA",
+        "en-GB",
+        "en",
+        "eo",
+        "es-AR",
+        "es-CL",
+        "es-ES",
+        "es-MX",
+        "et",
+        "eu",
+        "fa",
+        "ff",
+        "fi",
+        "fr",
+        "fur",
+        "fy",
+        "ga",
+        "gd",
+        "gl",
+        "gn",
+        "gu",
+        "he",
+        "hi",
+        "hr",
+        "hsb",
+        "hu",
+        "hy",
+        "ia",
+        "id",
+        "in",
+        "is",
+        "it",
+        "ja",
+        "ka",
+        "kab",
+        "kk",
+        "km",
+        "kn",
+        "ko",
+        "lij",
+        "lt",
+        "lv",
+        "mk",
+        "mr",
+        "ms",
+        "my",
+        "nb",
+        "ne",
+        "nl",
+        "nn",
+        "oc",
+        "pa-IN",
+        "pl",
+        "pt-BR",
+        "pt",
+        "rm",
+        "ro",
+        "ru",
+        "sat",
+        "sc",
+        "sco",
+        "si",
+        "sk",
+        "skr",
+        "sl",
+        "son",
+        "sq",
+        "sr",
+        "sv",
+        "szl",
+        "ta",
+        "te",
+        "tg",
+        "th",
+        "tl",
+        "tr",
+        "trs",
+        "uk",
+        "ur",
+        "uz",
+        "vi",
+        "xh",
+        "zh-TW",
+        "zh"
+      ],
+      "ruby_source_path": "Casks/f/firefox.rb",
+      "ruby_source_checksum": {
+        "sha256": "41a347d72007212e99b83113f067889aba1576115c319b2b2804cf90e335c380"
+      }
+    }
+  ]
+}
