@@ -7,6 +7,10 @@ use std::{
     time::Duration,
 };
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+// Linux can return ETXTBSY if another concurrent fork inherits a newly written
+// fixture's writable descriptor before exec closes it. Serialize fixture tests;
+// each test still exercises the runner's concurrent stdout/stderr and cancellation.
+static FIXTURE_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 struct Fake(PathBuf);
 impl Fake {
     fn new(body: &str) -> Self {
@@ -27,6 +31,7 @@ impl Drop for Fake {
 }
 #[tokio::test]
 async fn output_is_streamed_before_exit_and_stderr_is_drained() {
+    let _fixture_guard = FIXTURE_GATE.acquire().await.unwrap();
     let fake = Fake::new(
         "import sys,time\nprint('first', flush=True)\ntime.sleep(0.3)\nprint('diagnostic', file=sys.stderr, flush=True)\nsys.exit(7)",
     );
@@ -53,6 +58,7 @@ async fn output_is_streamed_before_exit_and_stderr_is_drained() {
 }
 #[tokio::test]
 async fn query_preserves_arguments_and_reports_errors() {
+    let _fixture_guard = FIXTURE_GATE.acquire().await.unwrap();
     let fake = Fake::new("import json,sys\nprint(json.dumps(sys.argv[1:]))");
     let args = vec!["one argument".into(), "$(touch /tmp/never)".into()];
     let bytes = runner::query(&fake.0, &args).await.unwrap();
@@ -69,6 +75,7 @@ async fn query_preserves_arguments_and_reports_errors() {
 
 #[tokio::test]
 async fn search_retains_casks_when_formula_query_has_no_matches() {
+    let _fixture_guard = FIXTURE_GATE.acquire().await.unwrap();
     use lazybrew::{
         backend::{BrewBackend, cli::CliBackend},
         domain::PackageKind,
@@ -84,6 +91,7 @@ async fn search_retains_casks_when_formula_query_has_no_matches() {
 
 #[tokio::test]
 async fn cancellation_terminates_descendants_and_emits_one_terminal_event() {
+    let _fixture_guard = FIXTURE_GATE.acquire().await.unwrap();
     let fake = Fake::new(
         "import subprocess,time\np=subprocess.Popen(['sleep','30'])\nprint(p.pid, flush=True)\ntime.sleep(30)",
     );
@@ -124,6 +132,7 @@ async fn cancellation_terminates_descendants_and_emits_one_terminal_event() {
 
 #[tokio::test]
 async fn plans_stop_on_failure_and_emit_a_single_result() {
+    let _fixture_guard = FIXTURE_GATE.acquire().await.unwrap();
     let fake = Fake::new(
         "import sys\nprint('executed '+sys.argv[1],flush=True)\nsys.exit(9 if sys.argv[1]=='fail' else 0)",
     );
@@ -155,6 +164,7 @@ async fn plans_stop_on_failure_and_emit_a_single_result() {
 }
 #[tokio::test]
 async fn cancelled_plan_never_starts_later_steps() {
+    let _fixture_guard = FIXTURE_GATE.acquire().await.unwrap();
     let fake =
         Fake::new("import sys,time\nprint('executed '+sys.argv[1],flush=True)\ntime.sleep(30)");
     let mut handle =
