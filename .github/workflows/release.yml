@@ -1,0 +1,51 @@
+name: Release binaries
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Test native release
+        run: |
+          mkdir -p target/release
+          cp target/${{ matrix.target }}/release/lazybrew target/release/lazybrew
+          python3 scripts/smoke.py
+          python3 scripts/theme_smoke.py
+      - name: Package
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+          mkdir -p dist/package
+          cp target/${{ matrix.target }}/release/lazybrew dist/package/
+          codesign --force --sign - dist/package/lazybrew
+          cp LICENSE README.md config.example.toml dist/package/
+          tar -czf "dist/lazybrew-v${version}-${{ matrix.target }}.tar.gz" -C dist/package .
+          shasum -a 256 dist/*.tar.gz > dist/SHA256-${{ matrix.target }}.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lazybrew-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/SHA256-*.txt
+          if-no-files-found: error

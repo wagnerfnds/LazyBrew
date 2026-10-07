@@ -11,27 +11,31 @@ use ratatui::{
     },
 };
 
-pub const BG: Color = Color::Rgb(18, 22, 30);
-pub const PANEL: Color = Color::Rgb(24, 29, 39);
-pub const TEXT: Color = Color::Rgb(214, 222, 235);
-pub const MUTED: Color = Color::Rgb(119, 134, 156);
-pub const MINT: Color = Color::Rgb(130, 218, 185);
-pub const PEACH: Color = Color::Rgb(239, 182, 137);
-pub const BORDER: Color = Color::Rgb(53, 65, 82);
-pub const SELECTED: Color = Color::Rgb(40, 59, 68);
 fn styled(text: impl Into<String>, color: Color) -> Span<'static> {
     Span::styled(text.into(), Style::default().fg(color))
 }
-fn panel(title: impl Into<String>, focused: bool) -> Block<'static> {
+fn panel(
+    palette: crate::theme::Palette,
+    title: impl Into<String>,
+    focused: bool,
+) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(styled(
             format!(" {} ", title.into()),
-            if focused { MINT } else { MUTED },
+            if focused {
+                palette.accent
+            } else {
+                palette.muted
+            },
         ))
-        .border_style(Style::default().fg(if focused { MINT } else { BORDER }))
-        .style(Style::default().bg(PANEL).fg(TEXT))
+        .border_style(Style::default().fg(if focused {
+            palette.accent
+        } else {
+            palette.border
+        }))
+        .style(Style::default().bg(palette.panel).fg(palette.text))
 }
 pub fn popup(area: Rect, width: u16, height: u16) -> Rect {
     let w = width.min(area.width);
@@ -47,21 +51,23 @@ fn hit(app: &mut App, rect: Rect, action: HitAction) {
     app.hits.push(Hit { rect, action });
 }
 fn button(frame: &mut Frame, app: &mut App, area: Rect, key: char, label: &str, accent: Color) {
+    let palette = app.theme.palette();
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             styled(format!(" {key} "), accent),
-            styled(format!("{label} "), TEXT),
+            styled(format!("{label} "), palette.text),
         ]))
-        .style(Style::default().bg(SELECTED)),
+        .style(Style::default().bg(palette.selected)),
         area,
     );
     hit(app, area, HitAction::Key(KeyCode::Char(key)));
 }
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    let palette = app.theme.palette();
     app.hits.clear();
     let area = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().bg(BG).fg(TEXT)),
+        Block::default().style(Style::default().bg(palette.bg).fg(palette.text)),
         area,
     );
     if area.width < 60 || area.height < 18 {
@@ -69,7 +75,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             Paragraph::new(
                 "LazyBrew\n\nA little more room to brew.\nResize to at least 60 × 18.\nq to quit",
             )
-            .style(Style::default().fg(MINT)),
+            .style(Style::default().fg(palette.accent)),
             area,
         );
         return;
@@ -87,9 +93,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Paragraph::new(Line::from(vec![
             Span::styled(
                 "  lazybrew",
-                Style::default().fg(MINT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
-            styled("  /  a better way to brew", MUTED),
+            styled("  /  a better way to brew", palette.muted),
         ])),
         top[0],
     );
@@ -101,8 +109,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         "● READY"
     };
     frame.render_widget(
-        Paragraph::new(format!("{state}    v{}", env!("CARGO_PKG_VERSION")))
-            .style(Style::default().fg(if app.busy { PEACH } else { MINT })),
+        Paragraph::new(format!("{state}    v{}", env!("CARGO_PKG_VERSION"))).style(
+            Style::default().fg(if app.busy {
+                palette.warning
+            } else {
+                palette.accent
+            }),
+        ),
         top[1],
     );
     let columns =
@@ -111,7 +124,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let right = Layout::vertical([Constraint::Percentage(66), Constraint::Percentage(34)])
         .split(columns[1]);
 
-    let nav = panel("WORKSPACE", false);
+    let nav = panel(palette, "WORKSPACE", false);
     let nav_inner = nav.inner(left[0]);
     frame.render_widget(nav, left[0]);
     for (index, tab) in Tab::ALL.iter().enumerate() {
@@ -130,11 +143,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(
             Paragraph::new(label).style(if app.tab == *tab {
                 Style::default()
-                    .fg(MINT)
-                    .bg(SELECTED)
+                    .fg(palette.accent)
+                    .bg(palette.selected)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(MUTED).bg(PANEL)
+                Style::default().fg(palette.muted).bg(palette.panel)
             }),
             rect,
         );
@@ -147,7 +160,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         1,
     );
     frame.render_widget(
-        Paragraph::new("← → switch · click to open").style(Style::default().fg(MUTED)),
+        Paragraph::new("← → switch · click to open").style(Style::default().fg(palette.muted)),
         hint,
     );
 
@@ -157,7 +170,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         if item_count > 0 { app.selected + 1 } else { 0 },
         item_count
     );
-    let list_block = panel(title, app.focus == Focus::Packages);
+    let list_block = panel(palette, title, app.focus == Focus::Packages);
     let list_inner = list_block.inner(left[1]);
     frame.render_widget(list_block, left[1]);
     hit(app, left[1], HitAction::Focus(Focus::Packages));
@@ -172,8 +185,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     frame.render_widget(
         Paragraph::new(filter_text).style(
             Style::default()
-                .fg(if app.editing { MINT } else { MUTED })
-                .bg(if app.editing { SELECTED } else { PANEL }),
+                .fg(if app.editing {
+                    palette.accent
+                } else {
+                    palette.muted
+                })
+                .bg(if app.editing {
+                    palette.selected
+                } else {
+                    palette.panel
+                }),
         ),
         filter_rect,
     );
@@ -189,13 +210,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .iter()
             .map(|s| {
                 let color = match s.status.as_str() {
-                    "started" => MINT,
-                    "error" => Color::LightRed,
-                    _ => MUTED,
+                    "started" => palette.accent,
+                    "error" => palette.error,
+                    _ => palette.muted,
                 };
                 ListItem::new(Line::from(vec![
                     styled(" ● ", color),
-                    styled(s.name.clone(), TEXT),
+                    styled(s.name.clone(), palette.text),
                     styled(format!("  {}", s.status), color),
                 ]))
             })
@@ -213,12 +234,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                         } else {
                             " · "
                         },
-                        if p.outdated { PEACH } else { MUTED },
+                        if p.outdated {
+                            palette.warning
+                        } else {
+                            palette.muted
+                        },
                     ),
-                    styled(p.id.name().to_owned(), TEXT),
+                    styled(p.id.name().to_owned(), palette.text),
                     styled(
                         format!("  {}", p.installed.first().unwrap_or(&p.version)),
-                        MUTED,
+                        palette.muted,
                     ),
                 ]))
             })
@@ -243,15 +268,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         };
         frame.render_widget(
             Paragraph::new(message)
-                .style(Style::default().fg(MUTED))
+                .style(Style::default().fg(palette.muted))
                 .wrap(Wrap { trim: false }),
             list_area,
         );
     } else {
         frame.render_stateful_widget(
-            List::new(items)
-                .highlight_symbol("▎")
-                .highlight_style(Style::default().bg(SELECTED).add_modifier(Modifier::BOLD)),
+            List::new(items).highlight_symbol("▎").highlight_style(
+                Style::default()
+                    .bg(palette.selected)
+                    .add_modifier(Modifier::BOLD),
+            ),
             list_area,
             &mut app.list_state,
         );
@@ -273,8 +300,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Scrollbar::new(ScrollbarOrientation::VerticalRight)
                     .begin_symbol(None)
                     .end_symbol(None)
-                    .thumb_style(Style::default().fg(MINT))
-                    .track_style(Style::default().fg(BORDER)),
+                    .thumb_style(Style::default().fg(palette.accent))
+                    .track_style(Style::default().fg(palette.border)),
                 left[1],
                 &mut scrollbar,
             );
@@ -282,6 +309,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     let detail_block = panel(
+        palette,
         if app.detail_loading {
             "INSPECT  ·  fetching…"
         } else {
@@ -299,8 +327,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .map(|p| p.name().to_owned())
         .unwrap_or_else(|| "Your Homebrew, in focus.".into());
     frame.render_widget(
-        Paragraph::new(format!(" {name}"))
-            .style(Style::default().fg(PEACH).add_modifier(Modifier::BOLD)),
+        Paragraph::new(format!(" {name}")).style(
+            Style::default()
+                .fg(palette.warning)
+                .add_modifier(Modifier::BOLD),
+        ),
         detail_rows[0],
     );
     let text = if app.details.is_empty() {
@@ -316,7 +347,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             && line
                 .chars()
                 .all(|c| c.is_ascii_uppercase() || c == ' ' || c == '/');
-        let color = if heading { MINT } else { TEXT };
+        let color = if heading {
+            palette.accent
+        } else {
+            palette.text
+        };
         for wrapped in wrap_line(line, width) {
             lines.push(Line::from(styled(format!(" {wrapped}"), color)));
         }
@@ -332,6 +367,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
 
     let output_block = panel(
+        palette,
         if app.busy {
             "ACTIVITY  ·  running"
         } else {
@@ -345,7 +381,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.output.is_empty() {
         frame.render_widget(
             Paragraph::new("\n No operations yet.\n Command output will stream here.")
-                .style(Style::default().fg(MUTED)),
+                .style(Style::default().fg(palette.muted)),
             output_inner,
         );
     } else {
@@ -363,13 +399,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Line::from(styled(
                     format!(" {s}"),
                     if s.starts_with('›') {
-                        PEACH
+                        palette.warning
                     } else if s.starts_with("Completed") {
-                        MINT
+                        palette.accent
                     } else if s.starts_with("Failed") || s.contains("Error:") {
-                        Color::LightRed
+                        palette.error
                     } else {
-                        MUTED
+                        palette.muted
                     },
                 ))
             })
@@ -377,20 +413,25 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Paragraph::new(lines), output_inner);
     }
 
-    let actions: Vec<(char, &str)> = match app.tab {
-        Tab::Services => vec![
-            ('s', "Start"),
-            ('t', "Stop"),
-            ('R', "Restart"),
-            ('r', "Refresh"),
-        ],
-        Tab::Available => vec![('i', "Install"), ('/', "Search"), ('r', "Refresh")],
-        _ => vec![
-            ('u', "Upgrade"),
-            ('x', "Remove"),
-            ('p', "Pin"),
-            ('r', "Refresh"),
-        ],
+    let actions: Vec<(char, &str)> = if app.busy {
+        vec![('X', "Cancel"), ('h', "History")]
+    } else {
+        match app.tab {
+            Tab::Services => vec![
+                ('s', "Start"),
+                ('t', "Stop"),
+                ('R', "Restart"),
+                ('r', "Refresh"),
+            ],
+            Tab::Available => vec![('i', "Install"), ('/', "Search"), ('r', "Refresh")],
+            _ => vec![
+                ('u', "Upgrade"),
+                ('x', "Remove"),
+                ('p', "Pin"),
+                ('v', "Activate"),
+                ('r', "Refresh"),
+            ],
+        }
     };
     let mut x = rows[2].x + 1;
     for (key, label) in actions {
@@ -402,7 +443,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Rect::new(x, rows[2].y, width, 1),
                 key,
                 label,
-                MINT,
+                palette.accent,
             );
             x += width + 1;
         }
@@ -412,6 +453,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ('U', "Update"),
         ('C', "Cleanup"),
         ('D', "Doctor"),
+        ('S', "Stacks"),
+        ('h', "History"),
         ('?', "Help"),
         ('q', "Quit"),
     ] {
@@ -423,36 +466,170 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Rect::new(x, rows[2].y + 1, width, 1),
                 key,
                 label,
-                PEACH,
+                palette.warning,
             );
             x += width + 1;
         }
     }
     frame.render_widget(
-        Paragraph::new(format!(" {}", app.status)).style(Style::default().fg(MUTED)),
+        Paragraph::new(format!(" {}", app.status)).style(Style::default().fg(palette.muted)),
         rows[3],
     );
 
     if app.help {
         app.hits.clear();
-        let rect = popup(area, 76, 23);
+        let rect = popup(area, 88, 27);
         frame.render_widget(Clear, rect);
-        frame.render_widget(Paragraph::new("\n  MOVE AROUND\n  1–5 / ← →        Switch workspace\n  Tab / Shift-Tab  Focus another panel\n  j k / ↑ ↓        Navigate or scroll focused panel\n  PgUp / PgDn      Scroll a page · Home / End list boundaries\n  Mouse            Click workspaces, rows, panels and actions\n  Wheel            Scroll the panel under the pointer\n\n  EXPLORE & ACT\n  /                Filter · Discover: Enter to search\n  Enter            Reload selected details\n  i / x / u / p    Install / remove / upgrade / pin formula\n  s / t / R        Start / stop / restart service\n  U / C / D        Homebrew update / cleanup / doctor\n  r                Refresh workspace\n  Esc              Clear filter / cancel operation\n  q / Ctrl-C       Quit after the active command finishes\n\n  Every operation asks for confirmation.  [ Close / Esc ]").style(Style::default().bg(PANEL).fg(TEXT)).block(panel("MAKE YOURSELF AT HOME", true)).wrap(Wrap { trim: false }), rect);
+        frame.render_widget(Paragraph::new("\n  MOVE AROUND\n  1–5 / ← →        Switch workspace\n  Tab / Shift-Tab  Focus another panel\n  j k / ↑ ↓        Navigate or scroll focused panel\n  PgUp / PgDn      Scroll a page · Home / End list boundaries\n  Mouse            Click workspaces, rows, panels and actions\n  Wheel            Scroll the panel under the pointer\n\n  EXPLORE & ACT\n  /                Filter · Discover: Enter to search\n  Enter            Reload selected details\n  i / x / u / p    Install / remove / upgrade / pin formula\n  s / t / R        Start / stop / restart service\n  U / C / D        Homebrew update / cleanup / doctor\n  r                Refresh workspace\n  v / S            Activate runtime version / development stacks\n  X / h            Cancel running command / operation history\n  Esc              Clear filter / cancel confirmation\n  q / Ctrl-C       Quit after the active command finishes\n\n  Every operation asks for confirmation.  [ Close / Esc ]").style(Style::default().bg(palette.panel).fg(palette.text)).block(panel(palette, "MAKE YOURSELF AT HOME", true)).wrap(Wrap { trim: false }), rect);
+        hit(app, rect, HitAction::Key(KeyCode::Esc));
+    }
+    if app.stacks_visible {
+        app.hits.clear();
+        let rect = popup(area, 88, 27);
+        frame.render_widget(Clear, rect);
+        let content = Rect::new(
+            rect.x + 1,
+            rect.y + 1,
+            rect.width.saturating_sub(2),
+            rect.height.saturating_sub(4),
+        );
+        let mut lines = Vec::new();
+        let mut selected_line = 0;
+        for line in ["j/k Select · i Setup · s Start · t Stop · Esc Close", ""] {
+            lines.extend(
+                wrap_line(line, content.width as usize)
+                    .into_iter()
+                    .map(Line::from),
+            );
+        }
+        if app.stacks.is_empty() {
+            lines.extend(
+                wrap_line(
+                    "Define [[stacks]] in config.toml. See config.example.toml.",
+                    content.width as usize,
+                )
+                .into_iter()
+                .map(Line::from),
+            );
+        }
+        for (index, stack) in app.stacks.iter().enumerate() {
+            if index == app.stack_selected {
+                selected_line = lines.len();
+            }
+            let text = format!(
+                "{} {}\n  Packages: {}\n  Services: {}",
+                if index == app.stack_selected {
+                    "›"
+                } else {
+                    " "
+                },
+                stack.name,
+                stack.formulae.join(", "),
+                stack.services.join(", ")
+            );
+            lines.extend(
+                text.lines()
+                    .flat_map(|line| wrap_line(line, content.width as usize))
+                    .map(Line::from),
+            );
+        }
+        let scroll = selected_line
+            .saturating_sub(content.height as usize / 2)
+            .min(lines.len().saturating_sub(content.height as usize)) as u16;
+        frame.render_widget(panel(palette, "DEVELOPMENT STACKS", true), rect);
+        frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), content);
+        for (offset, key, label) in [(0, 'i', "Setup"), (18, 's', "Start"), (36, 't', "Stop")] {
+            button(
+                frame,
+                app,
+                Rect::new(rect.x + 2 + offset, rect.bottom() - 2, 16, 1),
+                key,
+                label,
+                palette.accent,
+            );
+        }
+    }
+    if app.history_visible {
+        app.hits.clear();
+        let rect = popup(area, 90, 24);
+        frame.render_widget(Clear, rect);
+        let text = if app.history.is_empty() {
+            "No operations recorded yet.".to_string()
+        } else {
+            app.history
+                .iter()
+                .map(|entry| format!("{} · {}\n{}", entry.started, entry.result, entry.operation))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
+        let lines: Vec<Line> = text
+            .lines()
+            .flat_map(|line| wrap_line(line, rect.width.saturating_sub(2) as usize))
+            .map(Line::from)
+            .collect();
+        app.history_scroll = app.history_scroll.min(
+            lines
+                .len()
+                .saturating_sub(rect.height.saturating_sub(2) as usize) as u16,
+        );
+        frame.render_widget(
+            Paragraph::new(lines)
+                .scroll((app.history_scroll, 0))
+                .block(panel(
+                    palette,
+                    "OPERATION HISTORY · j/k to scroll · Esc to close",
+                    true,
+                )),
+            rect,
+        );
         hit(app, rect, HitAction::Key(KeyCode::Esc));
     }
     if let Some(op) = &app.pending {
         let description = op.to_string();
         app.hits.clear();
-        let rect = popup(area, 68, 10);
+        let height = description
+            .lines()
+            .count()
+            .saturating_add(8)
+            .min(area.height.saturating_sub(2) as usize) as u16;
+        let rect = popup(area, 88, height.max(10));
         frame.render_widget(Clear, rect);
-        frame.render_widget(Paragraph::new(format!("\n {description}\n\n This will run a Homebrew operation.\n Review the action, then confirm to continue.")).wrap(Wrap { trim: false }).block(panel("ONE QUICK CONFIRMATION", true)), rect);
+        frame.render_widget(
+            panel(
+                palette,
+                "ONE QUICK CONFIRMATION · j/k or PgUp/PgDn to review",
+                true,
+            ),
+            rect,
+        );
+        let content = Rect::new(
+            rect.x + 1,
+            rect.y + 1,
+            rect.width.saturating_sub(2),
+            rect.height.saturating_sub(5),
+        );
+        let text = format!(
+            "{description}\n\nThis will run a Homebrew operation. Review every step before confirming. Completed steps are not rolled back on failure or cancellation."
+        );
+        let lines: Vec<Line> = text
+            .lines()
+            .flat_map(|line| wrap_line(line, content.width as usize))
+            .map(Line::from)
+            .collect();
+        app.pending_scroll = app
+            .pending_scroll
+            .min(lines.len().saturating_sub(content.height as usize) as u16);
+        frame.render_widget(
+            Paragraph::new(lines).scroll((app.pending_scroll, 0)),
+            content,
+        );
         button(
             frame,
             app,
             Rect::new(rect.x + 3, rect.bottom() - 3, 15, 1),
             'y',
             "Confirm",
-            MINT,
+            palette.accent,
         );
         button(
             frame,
@@ -460,7 +637,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             Rect::new(rect.x + 20, rect.bottom() - 3, 14, 1),
             'n',
             "Cancel",
-            PEACH,
+            palette.warning,
         );
     }
 }

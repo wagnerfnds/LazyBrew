@@ -29,6 +29,23 @@ impl CliBackend {
 }
 pub fn operation_args(op: &Operation) -> Result<Vec<String>> {
     let args: Vec<&str> = match op {
+        Operation::Sequence { .. } => {
+            return Err(BrewError::Unsupported(
+                "Sequence requires a command plan".into(),
+            ));
+        }
+        Operation::Link(p) | Operation::Unlink(p) => {
+            if p.kind != PackageKind::Formula {
+                return Err(BrewError::Unsupported(
+                    "Version links require a formula".into(),
+                ));
+            }
+            if matches!(op, Operation::Link(_)) {
+                vec!["link", "--force", "--formula", p.name()]
+            } else {
+                vec!["unlink", "--formula", p.name()]
+            }
+        }
         Operation::Install(p) => vec!["install", p.kind.flag(), p.name()],
         Operation::Uninstall(p) => vec!["uninstall", p.kind.flag(), p.name()],
         Operation::Upgrade(p) => vec!["upgrade", p.kind.flag(), p.name()],
@@ -98,6 +115,17 @@ impl BrewBackend for CliBackend {
         .next()
         .ok_or_else(|| BrewError::Command("Package not found".into()))
     }
+    async fn catalogue(&self) -> Result<Vec<Package>> {
+        let (formulae, casks) =
+            tokio::try_join!(self.query(&["formulae"]), self.query(&["casks"]))?;
+        let mut packages =
+            parser::search(&String::from_utf8_lossy(&formulae), PackageKind::Formula);
+        packages.extend(parser::search(
+            &String::from_utf8_lossy(&casks),
+            PackageKind::Cask,
+        ));
+        Ok(packages)
+    }
     async fn search(&self, query: &str) -> Result<Vec<Package>> {
         // Restrict search to literal package-like substrings, never flags or regexes.
         PackageId::new(query, PackageKind::Formula)?;
@@ -115,6 +143,21 @@ impl BrewBackend for CliBackend {
         Ok(results)
     }
     async fn execute(&self, operation: Operation) -> Result<CommandHandle> {
-        runner::spawn(&self.path, &operation_args(&operation)?)
+        let plan = operation_plan(&operation)?;
+        runner::spawn_plan(&self.path, plan)
+    }
+}
+
+pub fn operation_plan(operation: &Operation) -> Result<Vec<Vec<String>>> {
+    match operation {
+        Operation::Sequence { steps, .. } => {
+            if steps.is_empty() || steps.len() > 100 {
+                return Err(BrewError::Unsupported(
+                    "Invalid operation plan length".into(),
+                ));
+            }
+            steps.iter().map(operation_args).collect()
+        }
+        operation => Ok(vec![operation_args(operation)?]),
     }
 }

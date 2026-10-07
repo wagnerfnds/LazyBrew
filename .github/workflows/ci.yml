@@ -20,3 +20,4 @@ jobs:
       - run: cargo test --locked
       - run: cargo build --release --locked
       - run: python3 scripts/smoke.py
+      - run: python3 scripts/theme_smoke.py

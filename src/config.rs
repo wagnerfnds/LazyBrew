@@ -4,7 +4,10 @@ use std::path::PathBuf;
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub brew_path: PathBuf,
+    pub theme: crate::theme::ThemeChoice,
     pub max_output_lines: usize,
+    pub refresh_interval_secs: u64,
+    pub stacks: Vec<crate::workflows::Stack>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -15,7 +18,10 @@ impl Default for Config {
             .into();
         Self {
             brew_path,
+            theme: crate::theme::ThemeChoice::Auto,
             max_output_lines: 2000,
+            refresh_interval_secs: 300,
+            stacks: Vec::new(),
         }
     }
 }
@@ -33,6 +39,15 @@ impl Config {
             Err(e) => return Err(e.into()),
         };
         config.max_output_lines = config.max_output_lines.clamp(100, 10000);
+        if config.refresh_interval_secs > 0 {
+            config.refresh_interval_secs = config.refresh_interval_secs.clamp(30, 86400);
+        }
+        anyhow::ensure!(config.stacks.len() <= 20, "At most 20 stacks are supported");
+        let mut names = std::collections::HashSet::new();
+        for stack in &config.stacks {
+            stack.validate()?;
+            anyhow::ensure!(names.insert(&stack.name), "Stack names must be unique");
+        }
         Ok(config)
     }
 }

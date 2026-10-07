@@ -1,6 +1,6 @@
 use crate::backend::{BrewError, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PackageKind {
     Formula,
     Cask,
@@ -13,7 +13,7 @@ impl PackageKind {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PackageId {
     name: String,
     pub kind: PackageKind,
@@ -41,7 +41,7 @@ impl PackageId {
         &self.name
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Package {
     pub id: PackageId,
     pub installed: Vec<String>,
@@ -50,14 +50,14 @@ pub struct Package {
     pub pinned: bool,
     pub outdated: bool,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageInfo {
     pub package: Package,
     pub homepage: String,
     pub dependencies: Vec<String>,
     pub caveats: String,
 }
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Service {
     pub name: String,
     pub status: String,
@@ -69,8 +69,14 @@ pub struct Service {
     pub schedulable: Option<bool>,
     pub pid: Option<u32>,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Operation {
+    Sequence {
+        label: String,
+        steps: Vec<Operation>,
+    },
+    Link(PackageId),
+    Unlink(PackageId),
     Install(PackageId),
     Uninstall(PackageId),
     Upgrade(PackageId),
@@ -85,7 +91,20 @@ pub enum Operation {
 }
 impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::Sequence { label, steps } = self {
+            writeln!(f, "{label}")?;
+            for (index, step) in steps.iter().enumerate() {
+                writeln!(f, "{}. {step}", index + 1)?;
+            }
+            return Ok(());
+        }
         let (action, package) = match self {
+            Self::Sequence { .. } => unreachable!(),
+            Self::Link(p) => (
+                "Activate version (link --force; existing files are preserved)",
+                Some(p),
+            ),
+            Self::Unlink(p) => ("Deactivate version (unlink)", Some(p)),
             Self::Install(p) => ("Install", Some(p)),
             Self::Uninstall(p) => ("Uninstall", Some(p)),
             Self::Upgrade(p) => ("Upgrade", Some(p)),
@@ -111,5 +130,19 @@ impl std::fmt::Display for Operation {
             )?;
         }
         Ok(())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PackageId {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            name: String,
+            kind: PackageKind,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.kind).map_err(serde::de::Error::custom)
     }
 }

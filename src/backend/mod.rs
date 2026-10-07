@@ -26,6 +26,9 @@ pub trait BrewBackend: Send + Sync + 'static {
     fn services(&self) -> impl Future<Output = Result<Vec<Service>>> + Send;
     fn service_info(&self, name: &str) -> impl Future<Output = Result<Vec<Service>>> + Send;
     fn package_info(&self, id: &PackageId) -> impl Future<Output = Result<PackageInfo>> + Send;
+    fn catalogue(&self) -> impl Future<Output = Result<Vec<Package>>> + Send {
+        async { Err(BrewError::Unsupported("Catalogue unavailable".into())) }
+    }
     fn search(&self, query: &str) -> impl Future<Output = Result<Vec<Package>>> + Send;
     fn execute(&self, operation: Operation) -> impl Future<Output = Result<CommandHandle>> + Send;
 }

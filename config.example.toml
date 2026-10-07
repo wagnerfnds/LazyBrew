@@ -1,3 +1,18 @@
 # Apple Silicon; Intel: /usr/local/bin/brew
 brew_path = "/opt/homebrew/bin/brew"
 max_output_lines = 2000
+# Follow terminal colors on startup; override with light or dark if needed.
+theme = "auto"
+# Background refresh (seconds). Set 0 to disable; enabled values clamp to 30–86400.
+refresh_interval_secs = 300
+
+# Each service must also appear in formulae. Setup installs missing packages first.
+[[stacks]]
+name = "Node + PostgreSQL"
+formulae = ["node", "postgresql@18"]
+services = ["postgresql@18"]
+
+[[stacks]]
+name = "PHP + MySQL"
+formulae = ["php", "mysql@9.7"]
+services = ["php", "mysql@9.7"]

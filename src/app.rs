@@ -1,6 +1,7 @@
 use crate::{
     backend::{BrewBackend, CommandEvent},
     domain::*,
+    storage::{self, HistoryEntry, Snapshot, Store},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
@@ -65,15 +66,18 @@ pub enum Event {
     Installed(Result<Vec<Package>, String>),
     Outdated(Result<Vec<Package>, String>),
     Services(Result<Vec<Service>, String>),
+    Catalogue(Result<Vec<Package>, String>),
     Search(u64, Result<Vec<Package>, String>),
     Details(u64, Result<String, String>),
     Output(CommandEvent),
     Error(String),
     Terminal(crossterm::event::Event),
     InputError(String),
+    Tick,
 }
 pub struct App {
     pub tab: Tab,
+    pub theme: crate::theme::Theme,
     pub focus: Focus,
     pub selected: usize,
     pub list_state: ListState,
@@ -81,14 +85,28 @@ pub struct App {
     pub outdated: Vec<Package>,
     pub services: Vec<Service>,
     pub available: Vec<Package>,
+    catalogue: Vec<Package>,
     pub filter: String,
     pub editing: bool,
     pub details: String,
     pub output: VecDeque<String>,
     pub status: String,
     pub pending: Option<Operation>,
+    pub pending_scroll: u16,
+    search_results: bool,
     pub busy: bool,
     pub help: bool,
+    pub stacks_visible: bool,
+    pub stacks: Vec<crate::workflows::Stack>,
+    pub stack_selected: usize,
+    pub history_visible: bool,
+    pub history_scroll: u16,
+    pub history: VecDeque<HistoryEntry>,
+    store: Option<Store>,
+    snapshot_updated: u64,
+    refresh_interval: Duration,
+    refresh_due: Instant,
+    cancellation: Option<tokio::sync::oneshot::Sender<()>>,
     pub quit: bool,
     pub output_scroll: usize,
     pub detail_scroll: u16,
@@ -110,6 +128,7 @@ impl App {
     pub fn new(max_lines: usize) -> Self {
         Self {
             tab: Tab::Formulae,
+            theme: crate::theme::Theme::Dark,
             focus: Focus::Packages,
             selected: 0,
             list_state: ListState::default(),
@@ -117,14 +136,28 @@ impl App {
             outdated: vec![],
             services: vec![],
             available: vec![],
+            catalogue: vec![],
             filter: String::new(),
             editing: false,
             details: String::new(),
             output: VecDeque::new(),
             status: "Connecting to Homebrew…".into(),
             pending: None,
+            pending_scroll: 0,
+            search_results: false,
             busy: false,
             help: false,
+            stacks_visible: false,
+            stacks: Vec::new(),
+            stack_selected: 0,
+            history_visible: false,
+            history_scroll: 0,
+            history: VecDeque::new(),
+            store: None,
+            snapshot_updated: 0,
+            refresh_interval: Duration::from_secs(300),
+            refresh_due: Instant::now() + Duration::from_secs(300),
+            cancellation: None,
             quit: false,
             output_scroll: 0,
             detail_scroll: 0,
@@ -142,6 +175,62 @@ impl App {
             detail_task: None,
             cache: VecDeque::new(),
         }
+    }
+    pub fn configure(&mut self, interval_secs: u64, store: Store) {
+        self.refresh_interval = Duration::from_secs(interval_secs);
+        self.refresh_due = Instant::now() + self.refresh_interval;
+        match store.load() {
+            Ok(snapshot) => {
+                self.installed = snapshot.installed;
+                self.outdated = snapshot.outdated;
+                self.services = snapshot.services;
+                self.catalogue = snapshot.catalogue;
+                self.available = self.catalogue.clone();
+                self.cache = snapshot.details;
+                self.history = snapshot.history;
+                self.snapshot_updated = snapshot.updated;
+                if snapshot.updated > 0 {
+                    self.status =
+                        format!("Cached snapshot from {} · refreshing…", snapshot.updated);
+                }
+            }
+            Err(e) => self.log(&format!("Could not load saved state: {e}")),
+        }
+        self.store = Some(store);
+        self.sync_preview();
+    }
+    fn persist(&mut self) {
+        if let Some(store) = &self.store {
+            let result = store.save(Snapshot {
+                updated: self.snapshot_updated,
+                installed: self.installed.clone(),
+                outdated: self.outdated.clone(),
+                services: self.services.clone(),
+                catalogue: self.catalogue.clone(),
+                details: self.cache.clone(),
+                history: self.history.clone(),
+            });
+            if let Err(e) = result {
+                self.log(&format!("Could not save state: {e}"));
+            }
+        }
+    }
+    fn finish_operation(&mut self, result: String) {
+        self.busy = false;
+        self.cancellation = None;
+        if let Some(entry) = self
+            .history
+            .front_mut()
+            .filter(|entry| entry.finished.is_none())
+        {
+            entry.finished = Some(storage::now());
+            entry.result = result;
+        }
+        self.persist();
+    }
+    pub fn refresh_delay(&self) -> Option<Duration> {
+        (self.refresh_interval != Duration::ZERO)
+            .then(|| self.refresh_due.saturating_duration_since(Instant::now()))
     }
     pub fn packages(&self) -> Vec<&Package> {
         let source = match self.tab {
@@ -295,11 +384,16 @@ impl App {
         }));
     }
     pub fn refresh<B: BrewBackend>(&mut self, backend: Arc<B>, tx: mpsc::Sender<Event>) {
+        self.refresh_due = Instant::now() + self.refresh_interval;
+        if self.busy {
+            self.refresh_pending = true;
+            return;
+        }
         if self.loading > 0 {
             self.refresh_pending = true;
             return;
         }
-        self.loading = 3;
+        self.loading = 4;
         self.load_failed = false;
         self.cache.clear();
         self.generation += 1;
@@ -319,6 +413,12 @@ impl App {
         tokio::spawn(async move {
             let r = b.outdated_packages().await.map_err(|e| e.to_string());
             let _ = t.send(Event::Outdated(r)).await;
+        });
+        let b = backend.clone();
+        let t = tx.clone();
+        tokio::spawn(async move {
+            let r = b.catalogue().await.map_err(|e| e.to_string());
+            let _ = t.send(Event::Catalogue(r)).await;
         });
         tokio::spawn(async move {
             let r = backend.services().await.map_err(|e| e.to_string());
@@ -349,7 +449,17 @@ impl App {
         backend: Arc<B>,
         tx: mpsc::Sender<Event>,
     ) {
+        let inventory_result = matches!(
+            &event,
+            Event::Installed(_) | Event::Outdated(_) | Event::Services(_) | Event::Catalogue(_)
+        );
         match event {
+            Event::Tick => {
+                self.refresh_due = Instant::now() + self.refresh_interval;
+                if !self.busy && self.loading == 0 && self.pending.is_none() && !self.editing {
+                    self.refresh(backend.clone(), tx.clone());
+                }
+            }
             Event::Installed(r) => {
                 self.loading = self.loading.saturating_sub(1);
                 match r {
@@ -364,6 +474,18 @@ impl App {
                     Err(e) => self.query_error(e),
                 }
             }
+            Event::Catalogue(r) => {
+                self.loading = self.loading.saturating_sub(1);
+                match r {
+                    Ok(packages) => {
+                        self.catalogue = packages;
+                        if !self.search_loading && !self.search_results {
+                            self.available = self.catalogue.clone();
+                        }
+                    }
+                    Err(error) => self.query_error(error),
+                }
+            }
             Event::Services(r) => {
                 self.loading = self.loading.saturating_sub(1);
                 match r {
@@ -375,13 +497,16 @@ impl App {
                 self.search_loading = false;
                 match r {
                     Ok(p) => {
+                        self.search_results = true;
                         self.available = p;
                         self.selected = 0;
                         self.list_state = ListState::default();
                         self.status = format!("{} results", self.available.len());
                     }
                     Err(e) => {
-                        self.status = e.clone();
+                        self.search_results = false;
+                        self.available = self.catalogue.clone();
+                        self.status = format!("Search failed · showing cached matches: {e}");
                         self.log(&e);
                     }
                 }
@@ -397,6 +522,7 @@ impl App {
                             self.cache.truncate(64);
                         }
                         self.details = text;
+                        self.persist();
                     }
                     Err(e) => {
                         self.details.push_str(&format!(
@@ -407,7 +533,11 @@ impl App {
             }
             Event::Output(CommandEvent::Output(text)) => self.log(&text),
             Event::Output(CommandEvent::Finished { success, code }) => {
-                self.busy = false;
+                self.finish_operation(format!(
+                    "{} · exit {:?}",
+                    if success { "Completed" } else { "Failed" },
+                    code
+                ));
                 self.log(&format!(
                     "{} · exit {}",
                     if success { "Completed" } else { "Failed" },
@@ -416,8 +546,13 @@ impl App {
                 ));
                 self.refresh(backend.clone(), tx.clone());
             }
+            Event::Output(CommandEvent::Cancelled) => {
+                self.finish_operation("Cancelled".into());
+                self.log("Cancelled · refreshing actual Homebrew state");
+                self.refresh(backend.clone(), tx.clone());
+            }
             Event::Error(e) => {
-                self.busy = false;
+                self.finish_operation(format!("Failed: {e}"));
                 self.status = e.clone();
                 self.log(&e);
             }
@@ -427,10 +562,14 @@ impl App {
             }
             _ => {}
         }
-        if self.loading == 0 && self.status == "Refreshing Homebrew…" && !self.load_failed {
-            self.status = "All caught up · select a package to explore".into();
+        if inventory_result && self.loading == 0 && !self.load_failed {
+            self.snapshot_updated = storage::now();
+            self.persist();
+            if self.status == "Refreshing Homebrew…" {
+                self.status = "All caught up · select a package to explore".into();
+            }
         }
-        if self.loading == 0 && self.refresh_pending {
+        if self.loading == 0 && self.refresh_pending && !self.busy {
             self.refresh_pending = false;
             self.refresh(backend, tx);
         }
@@ -525,24 +664,101 @@ impl App {
             }
             return;
         }
+        if self.stacks_visible && self.pending.is_none() {
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.stack_selected =
+                        (self.stack_selected + 1).min(self.stacks.len().saturating_sub(1))
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.stack_selected = self.stack_selected.saturating_sub(1)
+                }
+                KeyCode::Char(action @ ('i' | 's' | 't')) if !self.busy => {
+                    if let Some(stack) = self.stacks.get(self.stack_selected) {
+                        match stack.plan(action, &self.installed) {
+                            Ok(plan) => {
+                                self.pending = Some(plan);
+                                self.stacks_visible = false;
+                            }
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('S') => self.stacks_visible = false,
+                _ => {}
+            }
+            return;
+        }
+        if self.history_visible {
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.history_scroll = self.history_scroll.saturating_add(1)
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.history_scroll = self.history_scroll.saturating_sub(1)
+                }
+                KeyCode::PageDown => self.history_scroll = self.history_scroll.saturating_add(10),
+                KeyCode::PageUp => self.history_scroll = self.history_scroll.saturating_sub(10),
+                KeyCode::Home => self.history_scroll = 0,
+                _ => self.history_visible = false,
+            }
+            return;
+        }
+        if key.code == KeyCode::Char('X') && self.busy {
+            if let Some(cancel) = self.cancellation.take() {
+                let _ = cancel.send(());
+                self.status = "Cancelling Homebrew operation…".into();
+            }
+            return;
+        }
         if self.help {
             self.help = false;
             return;
         }
         if self.pending.is_some() {
             match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.pending_scroll = self.pending_scroll.saturating_add(1)
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.pending_scroll = self.pending_scroll.saturating_sub(1)
+                }
+                KeyCode::PageDown => self.pending_scroll = self.pending_scroll.saturating_add(10),
+                KeyCode::PageUp => self.pending_scroll = self.pending_scroll.saturating_sub(10),
                 KeyCode::Char('y') => {
                     let op = self.pending.take().unwrap();
                     self.busy = true;
+                    let (cancel, mut cancelled) = tokio::sync::oneshot::channel();
+                    self.cancellation = Some(cancel);
+                    self.history.push_front(HistoryEntry {
+                        operation: op.to_string(),
+                        started: storage::now(),
+                        finished: None,
+                        result: "Running".into(),
+                    });
+                    self.history.truncate(100);
+                    self.persist();
                     self.output_scroll = 0;
                     self.log(&format!("› {op}"));
                     self.status = "Running Homebrew operation…".into();
                     tokio::spawn(async move {
                         match backend.execute(op).await {
                             Ok(mut handle) => {
-                                while let Some(event) = handle.events.recv().await {
-                                    if tx.send(Event::Output(event)).await.is_err() {
-                                        break;
+                                let mut cancellation_received = false;
+                                loop {
+                                    tokio::select! {
+                                        request = &mut cancelled, if !cancellation_received => {
+                                            cancellation_received = true;
+                                            if request.is_ok() { handle.cancel(); }
+                                        }
+                                        event = handle.events.recv() => {
+                                            let Some(event) = event else {
+                                                let _ = tx.send(Event::Error("Command event stream closed".into())).await;
+                                                break;
+                                            };
+                                            let terminal = !matches!(event, CommandEvent::Output(_));
+                                            if tx.send(Event::Output(event)).await.is_err() || terminal { break; }
+                                        }
                                     }
                                 }
                             }
@@ -595,6 +811,7 @@ impl App {
             self.list_state = ListState::default();
             return;
         }
+        self.pending_scroll = 0;
         let id = self.id();
         match key.code {
             KeyCode::Char('q') => {
@@ -605,12 +822,18 @@ impl App {
                 }
             }
             KeyCode::Char('?') => self.help = true,
+            KeyCode::Char('h') => self.history_visible = true,
+            KeyCode::Char('S') => self.stacks_visible = true,
             KeyCode::Char('/') => {
                 self.editing = true;
                 self.focus = Focus::Packages;
             }
             KeyCode::Esc => {
                 self.filter.clear();
+                if self.tab == Tab::Available {
+                    self.search_results = false;
+                    self.available = self.catalogue.clone();
+                }
                 self.selected = 0;
                 self.search_generation += 1;
                 self.search_loading = false;
@@ -654,6 +877,16 @@ impl App {
                 let installed = id
                     .as_ref()
                     .is_some_and(|id| self.installed.iter().any(|p| &p.id == id));
+                if c == 'v' {
+                    if let Some(id) = id {
+                        match crate::workflows::switch_version(&id, &self.installed, &self.services)
+                        {
+                            Ok(plan) => self.pending = Some(plan),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                    }
+                    return;
+                }
                 self.pending = match c {
                     'U' => Some(Operation::Update),
                     'C' => Some(Operation::Cleanup),

@@ -25,6 +25,10 @@ fn color(color: Color) -> String {
 }
 fn main() -> anyhow::Result<()> {
     let mut app = App::new(100);
+    let light = std::env::args().any(|arg| arg == "--light");
+    if light {
+        app.theme = lazybrew::theme::Theme::Light;
+    }
     for (name, version) in [
         ("mysql@9.7", "9.7.2"),
         ("postgresql@18", "18.6"),
@@ -85,6 +89,9 @@ fn main() -> anyhow::Result<()> {
     let mut svg = String::from(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1240\" height=\"814\" viewBox=\"0 0 1240 814\" role=\"img\" aria-label=\"LazyBrew services workspace, rendered with fictional demo data\">\n<rect width=\"1240\" height=\"814\" rx=\"16\" fill=\"#12161e\"/><circle cx=\"26\" cy=\"23\" r=\"6\" fill=\"#ef8585\"/><circle cx=\"46\" cy=\"23\" r=\"6\" fill=\"#efb689\"/><circle cx=\"66\" cy=\"23\" r=\"6\" fill=\"#82dab9\"/><text x=\"620\" y=\"28\" fill=\"#77869c\" font-size=\"13\" text-anchor=\"middle\" font-family=\"monospace\">lazybrew — services</text>\n",
     );
+    svg = svg
+        .replace("#12161e", &color(app.theme.palette().bg))
+        .replace("#77869c", &color(app.theme.palette().muted));
     for y in 0..38 {
         for x in 0..120 {
             let cell = &buffer[(x, y)];
@@ -123,6 +130,13 @@ fn main() -> anyhow::Result<()> {
     }
     svg.push_str("</g></svg>\n");
     std::fs::create_dir_all("docs")?;
-    std::fs::write("docs/preview.svg", svg)?;
+    std::fs::write(
+        if light {
+            "docs/preview-light.svg"
+        } else {
+            "docs/preview.svg"
+        },
+        svg,
+    )?;
     Ok(())
 }

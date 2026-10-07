@@ -22,6 +22,10 @@ struct Args {
     config: Option<PathBuf>,
     #[arg(long)]
     brew_path: Option<PathBuf>,
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
+    #[arg(long, value_enum)]
+    theme: Option<lazybrew::theme::ThemeChoice>,
 }
 struct TerminalGuard;
 impl Drop for TerminalGuard {
@@ -41,7 +45,10 @@ async fn main() -> anyhow::Result<()> {
         io::stdin().is_terminal() && io::stdout().is_terminal(),
         "LazyBrew needs an interactive terminal"
     );
-    let log_dir = lazybrew::config::dirs()?.data_local_dir().join("logs");
+    let data_dir = args
+        .data_dir
+        .unwrap_or(lazybrew::config::dirs()?.data_local_dir().to_path_buf());
+    let log_dir = data_dir.join("logs");
     std::fs::create_dir_all(&log_dir)?;
     let (writer, _log_guard) =
         tracing_appender::non_blocking(tracing_appender::rolling::daily(log_dir, "lazybrew.log"));
@@ -53,9 +60,15 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(writer)
         .with_ansi(false)
         .init();
-    let backend = Arc::new(CliBackend::new(config.brew_path));
+    let backend = Arc::new(CliBackend::new(config.brew_path.clone()));
     let (tx, mut rx) = tokio::sync::mpsc::channel(256);
     let mut app = App::new(config.max_output_lines);
+    app.theme = args.theme.unwrap_or(config.theme).resolve();
+    app.stacks = config.stacks;
+    app.configure(
+        config.refresh_interval_secs,
+        lazybrew::storage::Store::new(data_dir.join("state.json"), config.brew_path),
+    );
     let mut terminal = ratatui::init();
     let _guard = TerminalGuard;
     execute!(io::stdout(), EnableMouseCapture)?;
@@ -85,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
     while !app.quit {
         terminal.draw(|f| ui::draw(f, &mut app))?;
         let delay = app.details_delay();
+        let refresh_delay = app.refresh_delay();
         tokio::select! {
             message = rx.recv() => {
                 let Some(message) = message else { break; };
@@ -93,6 +107,9 @@ async fn main() -> anyhow::Result<()> {
                 for _ in 0..63 {
                     match rx.try_recv() { Ok(message) => dispatch(message, &mut app, &backend, &tx), Err(_) => break }
                 }
+            }
+            _ = tokio::time::sleep(refresh_delay.unwrap_or(Duration::from_secs(3600))), if refresh_delay.is_some() => {
+                app.event(AppEvent::Tick, backend.clone(), tx.clone());
             }
             _ = tokio::time::sleep(delay.unwrap_or(Duration::from_secs(3600))), if delay.is_some() => {
                 app.fetch_details(backend.clone(), tx.clone());

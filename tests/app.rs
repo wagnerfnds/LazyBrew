@@ -190,3 +190,68 @@ fn tab_focus_and_page_scroll_leave_selected_package_unchanged() {
     assert_eq!(app.detail_scroll, 10);
     assert_eq!(app.selected, 0);
 }
+
+#[tokio::test]
+async fn automatic_refresh_defers_during_operations_and_confirmation() {
+    let backend = Arc::new(CliBackend::new("/missing/brew".into()));
+    let (tx, _rx) = tokio::sync::mpsc::channel(16);
+    let mut app = App::new(100);
+    app.busy = true;
+    app.event(Event::Tick, backend.clone(), tx.clone());
+    assert_eq!(app.loading, 0);
+    app.busy = false;
+    app.pending = Some(lazybrew::domain::Operation::Update);
+    app.event(Event::Tick, backend.clone(), tx.clone());
+    assert_eq!(app.loading, 0);
+    app.pending = None;
+    app.event(Event::Tick, backend, tx);
+    assert_eq!(app.loading, 4);
+    assert!(app.refresh_delay().unwrap() > std::time::Duration::from_secs(290));
+}
+#[tokio::test]
+async fn operation_result_is_persisted_and_offline_inventory_restored() {
+    use lazybrew::storage::Store;
+    let path = std::env::temp_dir().join(format!("lazybrew-app-state-{}.json", std::process::id()));
+    let mut app = App::new(100);
+    app.configure(0, Store::new(path.clone(), "/missing/brew".into()));
+    assert!(app.refresh_delay().is_none());
+    app.installed = parser::info(include_bytes!("fixtures/homebrew/installed.json"))
+        .unwrap()
+        .into_iter()
+        .map(|p| p.package)
+        .collect();
+    let backend = Arc::new(CliBackend::new("/missing/brew".into()));
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    app.key(key(KeyCode::Char('U')), backend.clone(), tx.clone());
+    app.key(key(KeyCode::Char('y')), backend.clone(), tx.clone());
+    assert!(app.busy);
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    app.event(event, backend, tx);
+    assert!(!app.busy);
+    assert!(app.history[0].result.starts_with("Failed"));
+    let mut restored = App::new(100);
+    restored.configure(0, Store::new(path.clone(), "/missing/brew".into()));
+    assert_eq!(restored.installed.len(), app.installed.len());
+    assert_eq!(restored.history.len(), 1);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn offline_catalogue_and_workflow_dialogs_render_and_scroll() {
+    let mut app = App::new(100);
+    app.stacks_visible = true;
+    render(&mut app);
+    app.stacks_visible = false;
+    app.history_visible = true;
+    render(&mut app);
+    app.history_visible = false;
+    app.pending = Some(lazybrew::domain::Operation::Sequence {
+        label: "Long plan".into(),
+        steps: vec![lazybrew::domain::Operation::Update; 50],
+    });
+    app.pending_scroll = 30;
+    render(&mut app);
+    assert!(app.pending_scroll > 0);
+}
