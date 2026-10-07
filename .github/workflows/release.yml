@@ -41,7 +41,7 @@ jobs:
           codesign --force --sign - dist/package/lazybrew
           cp LICENSE README.md config.example.toml dist/package/
           tar -czf "dist/lazybrew-v${version}-${{ matrix.target }}.tar.gz" -C dist/package .
-          shasum -a 256 dist/*.tar.gz > dist/SHA256-${{ matrix.target }}.txt
+          (cd dist && shasum -a 256 *.tar.gz > SHA256-${{ matrix.target }}.txt)
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: lazybrew-${{ matrix.target }}

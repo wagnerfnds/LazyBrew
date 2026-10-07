@@ -39,8 +39,17 @@ def check(mode, terminal_light=True, colorfgbg=None, reply=True, config_theme=No
             args.extend(["--theme", mode])
         # Keep the session leader alive after the app exits so macOS does not
         # hang up the PTY before terminal-restoration attributes can be inspected.
-        wrapper = "import subprocess,sys,signal; signal.signal(signal.SIGHUP,signal.SIG_IGN); result=subprocess.run(sys.argv[1:]); print('THEME_CHILD_EXIT:'+str(result.returncode),flush=True); sys.stdin.readline(); sys.exit(result.returncode)"
-        process = subprocess.Popen([sys.executable, "-c", wrapper, *args], stdin=slave, stdout=slave, stderr=slave, env=env, preexec_fn=controlling_tty)
+        release_signal = Path(folder) / "supervisor-release"
+        wrapper = "\n".join([
+            "import subprocess,sys,signal,time",
+            "from pathlib import Path",
+            "signal.signal(signal.SIGHUP,signal.SIG_IGN)",
+            "result=subprocess.run(sys.argv[2:])",
+            "print('THEME_CHILD_EXIT:'+str(result.returncode),flush=True)",
+            "while not Path(sys.argv[1]).exists(): time.sleep(.01)",
+            "sys.exit(result.returncode)",
+        ])
+        process = subprocess.Popen([sys.executable, "-c", wrapper, str(release_signal), *args], stdin=slave, stdout=slave, stderr=slave, env=env, preexec_fn=controlling_tty)
         raw = bytearray()
         answered = set()
         try:
@@ -70,8 +79,13 @@ def check(mode, terminal_light=True, colorfgbg=None, reply=True, config_theme=No
                 if select.select([master], [], [], .05)[0]:
                     raw.extend(os.read(master, 65536))
             assert b"THEME_CHILD_EXIT:0" in raw, "app did not exit successfully"
-            assert termios.tcgetattr(slave) == original, "terminal mode not restored"
-            os.write(master, b"\n")
+            restored = termios.tcgetattr(slave)
+            # PENDIN is transient queued-input state set by macOS after tcsetattr,
+            # not a terminal mode setting. The supervisor no longer reads the TTY.
+            restored[3] &= ~getattr(termios, "PENDIN", 0)
+            original[3] &= ~getattr(termios, "PENDIN", 0)
+            assert restored == original, "terminal mode not restored"
+            release_signal.touch()
             os.close(master)
             os.close(slave)
             master = slave = -1
